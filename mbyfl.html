@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Find Your Team | Monterey Bay Youth Football League</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --red:    #e21c21;
+      --navy:   #0d2570;
+      --dark:   #0a0a0a;
+      --card:   #141414;
+      --border: #2a2a2a;
+      --text:   #f0f0f0;
+      --muted:  #888;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--dark); color: var(--text); min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    #header {
+      background: linear-gradient(180deg, #0b1840 0%, #08102e 60%, var(--dark) 100%);
+      border-bottom: 2px solid var(--red);
+      padding: 14px 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    #header-text { flex: 0 0 auto; }
+    #header-text h1 {
+      font-size: 20px; font-weight: 800; color: #fff; letter-spacing: 0.2px; line-height: 1.2;
+    }
+    #header-text p { font-size: 12px; color: #8ab0e8; margin-top: 2px; }
+    #header-right {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-left: auto;
+    }
+    #search-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--red);
+    }
+    #search-wrap {
+      position: relative; width: 360px;
+    }
+    #addr-input {
+      width: 100%; padding: 16px 60px 16px 20px;
+      background: #1a1a1a; border: 2px solid #333; border-radius: 12px;
+      color: #fff; font-size: 16px; outline: none; transition: border-color 0.2s;
+    }
+    #addr-input:focus { border-color: var(--red); }
+    #addr-input::placeholder { color: #555; }
+    #search-btn {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: var(--red); border: none; border-radius: 8px; color: #fff;
+      width: 44px; height: 44px; font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+    #search-btn:hover { background: #c01010; }
+
+    /* Autocomplete dropdown */
+    #ac-list {
+      display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+      background: #1e1e1e; border: 1px solid #333; border-radius: 10px;
+      z-index: 9000; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,.6);
+    }
+    .ac-item {
+      padding: 11px 16px; font-size: 13.5px; cursor: pointer;
+      border-bottom: 1px solid #2a2a2a; color: #e0e0e0; line-height: 1.4;
+    }
+    .ac-item:last-child { border-bottom: none; }
+    .ac-item:hover, .ac-item.active { background: #2a2a2a; color: #fff; }
+    .ac-item strong { color: #fff; }
+    .ac-item small { color: #888; font-size: 12px; }
+
+    /* ── Modal overlay ── */
+    #result-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.78); z-index: 500;
+      align-items: center; justify-content: center; padding: 20px;
+      cursor: pointer;
+    }
+    #result-modal.open { display: flex; }
+    #result-content {
+      max-width: 540px; width: 100%; max-height: 90vh; overflow-y: auto;
+      cursor: default; position: relative;
+      animation: modalIn 0.22s cubic-bezier(0.34,1.1,0.64,1);
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.94) translateY(12px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .modal-close {
+      position: absolute; top: 10px; right: 10px; z-index: 2;
+      background: rgba(0,0,0,0.55); border: 1px solid #555; color: #aaa;
+      width: 30px; height: 30px; border-radius: 50%; font-size: 14px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, color 0.15s;
+    }
+    .modal-close:hover { background: #333; color: #fff; }
+
+    /* Single team */
+    .team-card {
+      background: var(--card); border-radius: 16px; overflow: hidden;
+      box-shadow: 0 4px 30px rgba(0,0,0,.5);
+    }
+    .team-card-header {
+      height: 7px; /* team color bar at top */
+    }
+    .team-card-body {
+      padding: 28px 32px; display: flex; align-items: flex-start; gap: 22px;
+    }
+    .team-logo-wrap {
+      width: 90px; height: 90px; flex-shrink: 0; border-radius: 50%;
+      overflow: hidden; background: #222; border: 3px solid #333;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .team-logo-wrap img { width: 100%; height: 100%; object-fit: cover; }
+    .team-info { flex: 1; }
+    .team-result-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--muted); margin-bottom: 5px;
+    }
+    .team-info h3 { font-size: 24px; font-weight: 800; color: #fff; line-height: 1.2; }
+    .team-info p { font-size: 14px; color: #aaa; margin-top: 6px; line-height: 1.5; }
+    .team-card-footer {
+      padding: 0 32px 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    }
+    .btn-cta {
+      padding: 12px 26px; border-radius: 10px; font-size: 14px; font-weight: 700;
+      cursor: pointer; border: none; text-decoration: none; display: inline-block;
+      transition: opacity 0.15s; color: #fff;
+    }
+    .btn-cta:hover { opacity: 0.88; }
+    .btn-secondary {
+      padding: 12px 22px; border-radius: 10px; font-size: 13px; font-weight: 600;
+      background: none; border: 1px solid #444; color: #aaa; cursor: pointer;
+      text-decoration: none; display: inline-block; transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-secondary:hover { border-color: #888; color: #fff; }
+
+    /* In/out badge */
+    .check-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: #1a2e1a; color: #4fd44f; border-radius: 8px;
+      padding: 6px 14px; font-size: 13px; font-weight: 600; margin-bottom: 12px;
+    }
+    .check-badge.out { background: #2e1a1a; color: #f06060; }
+    .check-badge.multi { background: #1a2240; color: #7ab0ff; }
+
+    /* Shared territory (2+ teams) */
+    .shared-header {
+      background: var(--card); border-radius: 16px 16px 0 0;
+      padding: 22px 28px 18px; border-bottom: 1px solid var(--border);
+      text-align: center;
+    }
+    .shared-header h3 { font-size: 20px; font-weight: 800; color: #fff; margin: 8px 0 6px; }
+    .shared-header p { font-size: 13px; color: #888; }
+    .team-choice-grid {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 0;
+      background: var(--card); border-radius: 0 0 16px 16px; overflow: hidden;
+      box-shadow: 0 4px 30px rgba(0,0,0,.5);
+    }
+    .team-choice { padding: 24px 20px; cursor: pointer; transition: background 0.15s; text-align: center; }
+    .team-choice:hover { background: #1e1e1e; }
+    .team-choice img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 3px solid #333; }
+    .team-choice h4 { font-size: 15px; font-weight: 700; color: #fff; margin: 10px 0 5px; }
+    .team-choice p { font-size: 12px; color: #888; margin-bottom: 14px; }
+    .team-choice .btn-cta { font-size: 13px; padding: 10px 18px; }
+    .choice-divider {
+      display: flex; align-items: center; justify-content: center;
+      background: #111; padding: 0 10px; font-size: 13px; font-weight: 700;
+      color: #555; letter-spacing: 1px; writing-mode: horizontal-tb;
+    }
+
+    /* Outside territory */
+    .outside-card {
+      background: var(--card); border-radius: 16px; padding: 32px;
+      text-align: center; border: 1px solid #2a2a2a;
+      box-shadow: 0 4px 30px rgba(0,0,0,.5);
+    }
+    .outside-card h3 { font-size: 20px; font-weight: 700; color: #f06060; margin: 10px 0 8px; }
+    .outside-card p { font-size: 14px; color: #888; line-height: 1.6; }
+    .outside-card .btn-secondary { margin-top: 20px; font-size: 14px; }
+
+    /* ── Map section ── */
+    #map-section {
+      padding: 40px 0 0; border-top: 1px solid var(--border);
+    }
+    #map-section h2 {
+      font-size: 16px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.5px; color: #555; text-align: center; margin-bottom: 16px; padding: 0 20px;
+    }
+    #map { height: 420px; width: 100%; }
+    #map-legend {
+      display: flex; flex-wrap: wrap; gap: 10px 18px;
+      padding: 16px 20px 28px; justify-content: center;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 12px; color: #888;
+    }
+    .legend-swatch {
+      width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0;
+    }
+    .legend-item.no-boundary { opacity: 0.4; }
+
+    /* Leaflet tooltip override */
+    .leaflet-tooltip.team-tip {
+      background: rgba(10,10,10,.88); color: #fff; border: 1px solid #333;
+      border-radius: 8px; font-size: 13px; font-weight: 700;
+      padding: 5px 11px; box-shadow: none; white-space: nowrap;
+    }
+    .leaflet-tooltip.team-tip::before { display: none; }
+
+    /* ── Footer ── */
+    #footer {
+      padding: 24px; text-align: center; border-top: 1px solid var(--border);
+      font-size: 12px; color: #444;
+    }
+    #footer a { color: #666; text-decoration: none; }
+    #footer a:hover { color: #aaa; }
+
+    /* ── Confetti ── */
+    #confetti-canvas {
+      position: fixed; inset: 0; pointer-events: none;
+      z-index: 9999; display: none;
+    }
+
+    @media (max-width: 720px) {
+      #header { flex-wrap: wrap; padding: 10px 14px; gap: 10px; }
+      #header-right { width: 100%; order: 3; align-items: stretch; }
+      #search-wrap { width: 100%; }
+      .team-card-body { flex-direction: column; align-items: center; text-align: center; }
+      .team-card-footer { justify-content: center; }
+      .team-choice-grid { grid-template-columns: 1fr; }
+      .choice-divider { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="confetti-canvas"></canvas>
+
+<!-- Header -->
+<div id="header">
+  <img src="mbyfl_logo.png" alt="MBYFL" style="height:64px;width:64px;object-fit:contain;flex-shrink:0"/>
+  <div id="header-text">
+    <h1>Monterey Bay Youth Football</h1>
+    <p>11 Teams · Monterey Bay Region · California</p>
+  </div>
+  <div id="header-right">
+    <span id="search-label">Find Your Team</span>
+    <div id="search-wrap">
+      <input type="text" id="addr-input" placeholder="Enter your address…" autocomplete="off" spellcheck="false"/>
+      <button id="search-btn" onclick="submitSearch()" title="Search">🔍</button>
+      <div id="ac-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Result modal -->
+<div id="result-modal" onclick="handleModalBg(event)">
+  <div id="result-content"></div>
+</div>
+
+<!-- Map -->
+<div id="map-section">
+  <h2>MBYFL Territory Map</h2>
+  <div id="map"></div>
+  <div id="map-legend"></div>
+</div>
+
+<!-- Footer -->
+<div id="footer">
+  <a href="https://www.montereybayyouthfootball.com" target="_blank">montereybayyouthfootball.com</a>
+  &nbsp;·&nbsp; Monterey Bay Youth Football League &nbsp;·&nbsp; Serving Central California Youth Since 1969
+  <br/><br/>
+  Made with ❤️🤍💙 by the <a href="https://coltsandbroncos.com" target="_blank">Salinas Colts &amp; Broncos</a>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// TEAM DATA
+// ─────────────────────────────────────────────────────────────────────────────
+// To add a team boundary:
+//   1. Open unidraw.html, draw the boundary and label it with the team name
+//   2. Export All → copy the coordinate array for that team
+//   3. Paste the array into the boundary field below
+//   4. Deploy
+
+const TEAMS = [
+  {
+    id: 'alisal',
+    name: 'Alisal Eagles',
+    color: '#1e7a2d',
+    hatchAngle: 20,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_71eca7f3905b4fdda8b08db5b83e5add~mv2.jpg/v1/fill/w_207,h_207,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/alisal-eagles_edited.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/alisal-eagles',
+    cta: { text: 'Register with Alisal Eagles', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Alisal community in East Salinas.'
+  },
+  {
+    id: 'gonzales',
+    name: 'Gonzales Knights',
+    color: '#c55a00',
+    hatchAngle: 48,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_7ae32a6dde4943738439d9d8bfa73d70~mv2.jpg/v1/fill/w_207,h_207,al_c,lg_1,q_80,enc_avif,quality_auto/Knights_edited.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/gonzales-knights',
+    cta: { text: 'Register with Gonzales Knights', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Gonzales community.'
+  },
+  {
+    id: 'hollister',
+    name: 'Hollister Rebels',
+    color: '#2244cc',
+    hatchAngle: 76,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_a926900bd24d4831b6f787b9e09170ed~mv2.jpg/v1/fill/w_207,h_207,al_c,lg_1,q_80,enc_avif,quality_auto/tri-county-rebels.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/hollister-rebels',
+    cta: { text: 'Register with Hollister Rebels', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Hollister & San Benito County area.'
+  },
+  {
+    id: 'kingcity',
+    name: 'King City Stangs',
+    color: '#1a4ea6',
+    hatchAngle: 104,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_90ba48c89cc041188dd2b8067bec5ec9~mv2.jpg/v1/crop/x_139,y_0,w_1665,h_1667/fill/w_207,h_207,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Stangs.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/king-city-stangs',
+    cta: { text: 'Register with King City Stangs', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving King City and South Monterey County.'
+  },
+  {
+    id: 'northcounty',
+    name: 'North County Bulldogs',
+    color: '#5c8a00',
+    hatchAngle: 132,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_92ac6f9f492b41a987a7d16f3972655a~mv2.jpg/v1/crop/x_240,y_0,w_1090,h_1089/fill/w_207,h_207,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bulldogs.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/north-county-bulldogs',
+    cta: { text: 'Register with North County Bulldogs', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving North Monterey County.'
+  },
+  {
+    id: 'scb',
+    name: 'Salinas Colts & Broncos',
+    color: '#c41230',
+    hatchAngle: 160,
+    boundary: [
+      [36.721893,-121.659894],[36.717025,-121.661139],[36.715615,-121.661503],
+      [36.713499,-121.662169],[36.711401,-121.66307],[36.708992,-121.664271],
+      [36.706791,-121.66528],[36.705414,-121.665924],[36.704124,-121.666353],
+      [36.702851,-121.666396],[36.701354,-121.666052],[36.699479,-121.665194],
+      [36.697552,-121.6644],[36.695436,-121.663413],[36.693509,-121.661954],
+      [36.69067,-121.658134],[36.687848,-121.654186],[36.68568,-121.650088],
+      [36.683649,-121.646204],[36.681997,-121.643457],[36.681017,-121.642556],
+      [36.679864,-121.641805],[36.67477,-121.640797],[36.672601,-121.640303],
+      [36.671482,-121.639745],[36.670398,-121.638672],[36.669538,-121.637363],
+      [36.668557,-121.634295],[36.667317,-121.629918],[36.66656,-121.628029],
+      [36.665682,-121.626592],[36.664323,-121.62509],[36.662584,-121.623909],
+      [36.660691,-121.622794],[36.657592,-121.620991],[36.654838,-121.619468],
+      [36.653616,-121.61876],[36.649364,-121.616206],[36.647763,-121.614962],
+      [36.64716,-121.615434],[36.650758,-121.624124],[36.645146,-121.627278],
+      [36.645576,-121.629596],[36.644801,-121.630261],[36.645111,-121.631784],
+      [36.644457,-121.632085],[36.644974,-121.633565],[36.638242,-121.637621],
+      [36.642047,-121.646376],[36.644457,-121.65174],[36.644784,-121.652663],
+      [36.64537,-121.654787],[36.646368,-121.658671],[36.647022,-121.661139],
+      [36.647487,-121.662941],[36.644405,-121.664228],[36.644578,-121.664529],
+      [36.644991,-121.665173],[36.645232,-121.665537],[36.645438,-121.665945],
+      [36.645903,-121.666696],[36.647763,-121.670516],[36.649656,-121.674163],
+      [36.652376,-121.679485],[36.654304,-121.683261],[36.656473,-121.687531],
+      [36.658728,-121.692059],[36.666835,-121.685214],[36.677231,-121.676502],
+      [36.679674,-121.674871],[36.682737,-121.675558],[36.686145,-121.674056],
+      [36.687246,-121.673412],[36.688932,-121.674528],[36.69141,-121.674957],
+      [36.693165,-121.679893],[36.700941,-121.680236],[36.702042,-121.679206],
+      [36.701389,-121.676631],[36.703935,-121.67294],[36.705758,-121.670666],
+      [36.707926,-121.667404],[36.709302,-121.665688],[36.713086,-121.663671],
+      [36.713912,-121.663799],[36.715047,-121.664829],[36.718935,-121.669078],
+      [36.722443,-121.664186]
+    ],
+    logo: 'SCB-Logo.png',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/salinas-colts-broncos',
+    cta: { text: 'Register Now 🏈', url: 'https://leagues.bluesombrero.com/coltsandbroncos' },
+    description: 'Serving Salinas youth since 1969. Where Salinas Comes to Play, Cheer, and Belong.'
+  },
+  {
+    id: 'seaside',
+    name: 'Seaside Raiders',
+    color: '#4a4a5a',
+    hatchAngle: 28,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_8621da9169414c07896a270b3e2252bc~mv2.jpeg/v1/fill/w_207,h_207,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/07oMlsky.jpeg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/seaside-raiders',
+    cta: { text: 'Register with Seaside Raiders', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Seaside & Monterey Peninsula area.'
+  },
+  {
+    id: 'soledad',
+    name: 'Soledad Warriors',
+    color: '#7b2fbf',
+    hatchAngle: 56,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_3be239b1f3d549d28a9ff340f8e671fd~mv2.jpg/v1/fill/w_217,h_207,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Warriors.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/soledad-warriors',
+    cta: { text: 'Register with Soledad Warriors', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Soledad community.'
+  },
+  {
+    id: 'steinbeck',
+    name: 'Steinbeck Tigers & Cubs',
+    color: '#cc5500',
+    hatchAngle: 84,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_bb22fd0ef2d7427dad85174a893c477d~mv2.jpeg/v1/fill/w_207,h_207,al_c,lg_1,q_80,enc_avif,quality_auto/images-2.jpeg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/steinbeck-tigers-cubs',
+    cta: { text: 'Register with Steinbeck Tigers & Cubs', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Steinbeck community in Salinas.'
+  },
+  {
+    id: 'toro',
+    name: 'Toro Bulls',
+    color: '#8b2000',
+    hatchAngle: 112,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_84d76288435e4b669b34be8f5c676a71~mv2.jpg/v1/fill/w_207,h_207,al_c,lg_1,q_80,enc_avif,quality_auto/toro-bulls.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/toro-bulls',
+    cta: { text: 'Register with Toro Bulls', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Toro Park & South Salinas area.'
+  },
+  {
+    id: 'watsonville',
+    name: 'Watsonville Wild Catz',
+    color: '#c8920a',
+    hatchAngle: 140,
+    boundary: [], // TODO: draw in unidraw.html
+    logo: 'https://static.wixstatic.com/media/10d4ef_b5badc654867406a8ee7f7ff460e6092~mv2.jpg/v1/crop/x_169,y_113,w_629,h_630/fill/w_207,h_207,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/jr%20ctaz%20logo.jpg',
+    mbyflUrl: 'https://www.montereybayyouthfootball.com/watsonville-wild-catz',
+    cta: { text: 'Register with Watsonville Wild Catz', url: 'https://www.montereybayyouthfootball.com' },
+    description: 'Serving the Watsonville & Santa Cruz County area.'
+  }
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Point-in-polygon — ray casting
+// ─────────────────────────────────────────────────────────────────────────────
+function isInside(lat, lng, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if (((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function findTeams(lat, lng) {
+  return TEAMS.filter(t => t.boundary.length >= 3 && isInside(lat, lng, t.boundary));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Nominatim autocomplete — California only
+// ─────────────────────────────────────────────────────────────────────────────
+let acResults = [], acIdx = -1, acTimer = null;
+const acList  = document.getElementById('ac-list');
+const addrIn  = document.getElementById('addr-input');
+
+addrIn.addEventListener('input', () => {
+  clearTimeout(acTimer);
+  const q = addrIn.value.trim();
+  if (q.length < 3) { hideAc(); return; }
+  acTimer = setTimeout(() => fetchSuggestions(q), 280);
+});
+
+addrIn.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown')  { e.preventDefault(); moveAc(1); }
+  else if (e.key === 'ArrowUp')   { e.preventDefault(); moveAc(-1); }
+  else if (e.key === 'Enter')     { e.preventDefault(); acIdx >= 0 ? selectAc(acIdx) : submitSearch(); }
+  else if (e.key === 'Escape')    { hideAc(); }
+});
+
+addrIn.addEventListener('blur', () => setTimeout(hideAc, 180));
+
+async function fetchSuggestions(q) {
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=1' +
+      '&countrycodes=us&viewbox=-124.5,32.5,-114.1,42.0&bounded=1&q=' + encodeURIComponent(q);
+    const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = (await res.json()).filter(r => r.address?.state === 'California');
+    acResults = data; acIdx = -1;
+    renderAc(data);
+  } catch (_) {}
+}
+
+function renderAc(items) {
+  if (!items.length) { hideAc(); return; }
+  acList.innerHTML = items.map((it, i) => {
+    const parts = it.display_name.split(', ');
+    return `<div class="ac-item" data-i="${i}" onmousedown="selectAc(${i})">
+      <strong>${parts[0]}</strong><br><small>${parts.slice(1, 4).join(', ')}</small>
+    </div>`;
+  }).join('');
+  acList.style.display = 'block';
+}
+
+function moveAc(dir) {
+  acIdx = Math.max(-1, Math.min(acResults.length - 1, acIdx + dir));
+  document.querySelectorAll('.ac-item').forEach((el, i) =>
+    el.classList.toggle('active', i === acIdx));
+}
+
+function selectAc(i) {
+  const it = acResults[i];
+  addrIn.value = it.display_name;
+  hideAc();
+  runCheck(parseFloat(it.lat), parseFloat(it.lon), it.display_name);
+}
+
+function hideAc() { acList.style.display = 'none'; }
+
+async function submitSearch() {
+  hideAc();
+  const q = addrIn.value.trim();
+  if (!q) return;
+  setResultLoading();
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1' +
+      '&countrycodes=us&viewbox=-124.5,32.5,-114.1,42.0&bounded=1&q=' + encodeURIComponent(q);
+    const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (!data.length) { showNotFound(); return; }
+    runCheck(parseFloat(data[0].lat), parseFloat(data[0].lon), data[0].display_name);
+  } catch (_) { showNotFound(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modal helpers
+// ─────────────────────────────────────────────────────────────────────────────
+const resultModal   = document.getElementById('result-modal');
+const resultContent = document.getElementById('result-content');
+
+function openModal(html) {
+  resultContent.innerHTML =
+    `<button class="modal-close" onclick="closeModal()" title="Close">✕</button>` + html;
+  resultModal.classList.add('open');
+}
+
+function closeModal() {
+  resultModal.classList.remove('open');
+  stopConfetti();
+}
+
+function handleModalBg(event) {
+  if (event.target === resultModal) closeModal();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Result rendering
+// ─────────────────────────────────────────────────────────────────────────────
+function setResultLoading() {
+  stopConfetti();
+  openModal(`<div style="background:var(--card);border-radius:16px;text-align:center;padding:48px;color:#555;font-size:14px">Checking territory…</div>`);
+}
+
+function runCheck(lat, lng, displayName) {
+  const matches = findTeams(lat, lng);
+  stopConfetti();
+
+  if (matches.length === 0) {
+    showNoMatch(displayName);
+  } else if (matches.length === 1) {
+    showSingleTeam(matches[0], displayName);
+  } else {
+    showMultiTeam(matches, displayName);
+  }
+
+  // Pan map to address
+  map.setView([lat, lng], 13, { animate: true });
+  if (addressMarker) map.removeLayer(addressMarker);
+  addressMarker = L.circleMarker([lat, lng], {
+    radius: 8, color: '#fff', weight: 2, fillColor: '#e21c21', fillOpacity: 1
+  }).addTo(map).bindTooltip('Your address', { direction: 'top' });
+}
+
+function showSingleTeam(team, addr) {
+  openModal(`
+    <div class="team-card">
+      <div class="team-card-header" style="background:${team.color}"></div>
+      <div class="team-card-body">
+        <div class="team-logo-wrap" style="border-color:${team.color}40">
+          <img src="${team.logo}" alt="${team.name}" onerror="this.style.display='none'"/>
+        </div>
+        <div class="team-info">
+          <div class="check-badge">✅ In Territory</div>
+          <div class="team-result-label">Your MBYFL Team</div>
+          <h3>${team.name}</h3>
+          <p>${team.description}</p>
+        </div>
+      </div>
+      <div class="team-card-footer">
+        <a class="btn-cta" style="background:${team.color}" href="${team.cta.url}" target="_blank">${team.cta.text}</a>
+        <a class="btn-secondary" href="${team.mbyflUrl}" target="_blank">MBYFL Team Page ↗</a>
+      </div>
+    </div>`);
+  launchConfetti([team.color, '#ffffff', lightenColor(team.color, 60)]);
+}
+
+function showMultiTeam(teams, addr) {
+  const cards = teams.map(t => `
+    <div class="team-choice" onclick="window.open('${t.cta.url}','_blank')">
+      <img src="${t.logo}" alt="${t.name}" onerror="this.style.display='none'"/>
+      <h4>${t.name}</h4>
+      <p>${t.description}</p>
+      <a class="btn-cta" style="background:${t.color}" href="${t.cta.url}" target="_blank">${t.cta.text}</a>
+    </div>`).join('<div class="choice-divider">OR</div>');
+
+  openModal(`
+    <div class="shared-header">
+      <div class="check-badge multi">⚠️ Shared Territory</div>
+      <h3>Your address is in overlapping territory</h3>
+      <p>Two MBYFL teams serve this area — choose the one that's right for your family.</p>
+    </div>
+    <div class="team-choice-grid">${cards}</div>`);
+  launchConfetti(teams.flatMap(t => [t.color, lightenColor(t.color, 50)]));
+}
+
+function showNoMatch(addr) {
+  openModal(`
+    <div class="outside-card">
+      <div class="check-badge out">❌ Outside Territory</div>
+      <h3>Outside MBYFL Boundaries</h3>
+      <p>We couldn't match your address to an MBYFL team territory. This may mean your area's
+         boundary hasn't been mapped yet, or your address is outside the MBYFL service region.</p>
+      <p style="margin-top:10px">Contact MBYFL directly to find out which team serves your area.</p>
+      <a class="btn-secondary" href="https://www.montereybayyouthfootball.com" target="_blank">
+        Visit MBYFL Website ↗
+      </a>
+    </div>`);
+}
+
+function showNotFound() {
+  openModal(`
+    <div class="outside-card">
+      <div class="check-badge out">⚠️ Address Not Found</div>
+      <h3>Couldn't find that address</h3>
+      <p>Try adding a city or zip code — for example: <em>"123 Main St, Salinas, CA 93901"</em></p>
+    </div>`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Map — Leaflet with SVG hatch patterns per team
+// ─────────────────────────────────────────────────────────────────────────────
+let addressMarker = null;
+
+const map = L.map('map', { zoomControl: true, scrollWheelZoom: true, renderer: L.svg() })
+  .setView([36.60, -121.55], 9);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap contributors © CARTO',
+  subdomains: 'abcd', maxZoom: 19
+}).addTo(map);
+
+// Inject SVG <defs> with diagonal stripe patterns for each team.
+// When two team polygons overlap, their different-angled stripes
+// create a natural cross-hatch pattern — no geometry clipping needed.
+function setupHatchPatterns() {
+  const pane = map.getPane('overlayPane');
+  let svgEl = pane.querySelector('svg');
+  if (!svgEl) {
+    // SVG pane may not exist until first polygon is added — retry after a tick
+    setTimeout(setupHatchPatterns, 80);
+    return;
+  }
+
+  let defs = svgEl.querySelector('defs');
+  if (!defs) {
+    defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    svgEl.insertBefore(defs, svgEl.firstChild);
+  }
+
+  TEAMS.forEach(team => {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
+    el.id = `hatch-${team.id}`;
+    el.setAttribute('patternUnits', 'userSpaceOnUse');
+    el.setAttribute('width', '10');
+    el.setAttribute('height', '10');
+    el.setAttribute('patternTransform', `rotate(${team.hatchAngle})`);
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', '10');
+    rect.setAttribute('height', '10');
+    rect.setAttribute('fill', team.color);
+    rect.setAttribute('fill-opacity', '0.15');
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', '0'); line.setAttribute('y1', '0');
+    line.setAttribute('x2', '0'); line.setAttribute('y2', '10');
+    line.setAttribute('stroke', team.color);
+    line.setAttribute('stroke-width', '2.5');
+    line.setAttribute('stroke-opacity', '0.75');
+
+    el.appendChild(rect);
+    el.appendChild(line);
+    defs.appendChild(el);
+  });
+}
+
+function addTeamLayer(team) {
+  if (team.boundary.length < 3) return;
+
+  const poly = L.polygon(team.boundary, {
+    color: team.color, weight: 2, opacity: 0.9,
+    fillColor: team.color, fillOpacity: 0.25
+  })
+  .addTo(map)
+  .bindTooltip(team.name, { direction: 'center', className: 'team-tip' });
+
+  // Apply the hatch pattern fill to the SVG path once rendered
+  poly.on('add', () => {
+    if (poly._path) poly._path.style.fill = `url(#hatch-${team.id})`;
+  });
+  // Also set immediately if path already exists
+  if (poly._path) poly._path.style.fill = `url(#hatch-${team.id})`;
+}
+
+function renderLegend() {
+  const legend = document.getElementById('map-legend');
+  legend.innerHTML = TEAMS.map(t => `
+    <div class="legend-item${t.boundary.length < 3 ? ' no-boundary' : ''}">
+      <div class="legend-swatch" style="background:${t.color}"></div>
+      ${t.name}${t.boundary.length < 3 ? ' (pending)' : ''}
+    </div>`).join('');
+}
+
+// First, add polygons — this causes Leaflet to create the SVG pane.
+// Then inject the hatch defs. The `poly.on('add', ...)` callback above
+// fires after defs are ready because it runs on the next render tick.
+TEAMS.forEach(addTeamLayer);
+setTimeout(setupHatchPatterns, 50);
+renderLegend();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Confetti
+// ─────────────────────────────────────────────────────────────────────────────
+let confFrame = null, confActive = false;
+
+function lightenColor(hex, amount) {
+  const n = parseInt(hex.replace('#',''), 16);
+  const r = Math.min(255, (n >> 16) + amount);
+  const g = Math.min(255, ((n >> 8) & 0xff) + amount);
+  const b = Math.min(255, (n & 0xff) + amount);
+  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+function launchConfetti(colors) {
+  const canvas = document.getElementById('confetti-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  canvas.style.display = 'block';
+
+  const particles = Array.from({ length: 110 }, () => ({
+    x: Math.random() * canvas.width,
+    y: -20 - Math.random() * 80,
+    r: 4 + Math.random() * 5,
+    color: colors[Math.floor(Math.random() * colors.length)],
+    vx: (Math.random() - 0.5) * 2.5,
+    vy: 2.5 + Math.random() * 3,
+    rot: Math.random() * Math.PI * 2,
+    rs: (Math.random() - 0.5) * 0.14,
+    rect: Math.random() < 0.55
+  }));
+
+  confActive = true;
+  let tick = 0;
+
+  (function draw() {
+    if (!confActive) { canvas.style.display = 'none'; return; }
+    tick++;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.rot += p.rs;
+      if (p.y > canvas.height + 20) { p.y = -20; p.x = Math.random() * canvas.width; }
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      if (p.rect) { ctx.fillRect(-p.r, -p.r * 0.45, p.r * 2, p.r * 0.9); }
+      else { ctx.beginPath(); ctx.arc(0, 0, p.r * 0.65, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    });
+    if (tick < 200) confFrame = requestAnimationFrame(draw);
+    else { confActive = false; canvas.style.display = 'none'; }
+  })();
+}
+
+function stopConfetti() {
+  confActive = false;
+  cancelAnimationFrame(confFrame);
+  document.getElementById('confetti-canvas').style.display = 'none';
+}
+</script>
+</body>
+</html>
