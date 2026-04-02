@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SCB Boundary Drawer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0efed; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    #toolbar {
+      display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+      background: #fff; border-bottom: 1px solid #ddd; flex-wrap: wrap; flex-shrink: 0;
+    }
+    #toolbar h1 { font-size: 14px; font-weight: 600; color: #111; margin-right: 4px; white-space: nowrap; }
+
+    .sep { width: 1px; height: 22px; background: #ddd; margin: 0 2px; }
+
+    .btn {
+      padding: 6px 13px; border-radius: 7px; font-size: 12.5px; font-weight: 500;
+      cursor: pointer; border: 1px solid #ccc; background: #fff; color: #333;
+      transition: background 0.15s; white-space: nowrap;
+    }
+    .btn:hover { background: #f0f0ee; }
+    .btn.primary { background: #1D6FA4; color: #fff; border-color: #1D6FA4; }
+    .btn.primary:hover { background: #175d8a; }
+    .btn.danger { background: #c0392b; color: #fff; border-color: #c0392b; }
+    .btn.danger:hover { background: #a93226; }
+    .btn.success { background: #27ae60; color: #fff; border-color: #27ae60; }
+    .btn.success:hover { background: #219a52; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .point-count {
+      display: inline-block; background: #1D6FA4; color: #fff;
+      border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
+    }
+
+    #status {
+      font-size: 12px; color: #666; margin-left: auto;
+      background: #f5f5f3; padding: 4px 10px; border-radius: 6px; border: 1px solid #e0e0dc; white-space: nowrap;
+    }
+    #export-status { font-size: 12px; color: #666; white-space: nowrap; }
+
+    #map { flex: 1; }
+    #map.draw-mode { cursor: crosshair; }
+
+    /* Paste-coords panel */
+    #paste-panel {
+      display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      background: #fff; border: 1px solid #ccc; border-radius: 12px;
+      padding: 22px; width: 500px; max-width: 95vw; z-index: 9999;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    #paste-panel h2 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    #paste-panel p { font-size: 12px; color: #666; margin-bottom: 10px; }
+    #paste-panel textarea {
+      width: 100%; height: 160px; font-family: monospace; font-size: 11px;
+      border: 1px solid #ddd; border-radius: 7px; padding: 10px; resize: none;
+      background: #fafaf8; outline: none;
+    }
+    #paste-panel textarea:focus { border-color: #1D6FA4; }
+    #paste-error { font-size: 12px; color: #c0392b; display: none; margin-top: 6px; }
+    #paste-panel .row { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+
+    #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9998; }
+
+    /* Coord-export panel */
+    #coord-panel {
+      display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      background: #fff; border: 1px solid #ccc; border-radius: 12px;
+      padding: 22px; width: 500px; max-width: 95vw; z-index: 9999;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    #coord-panel h2 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    #coord-panel p { font-size: 12px; color: #666; margin-bottom: 10px; }
+    #coord-panel textarea {
+      width: 100%; height: 160px; font-family: monospace; font-size: 11px;
+      border: 1px solid #ddd; border-radius: 7px; padding: 10px; resize: none;
+      background: #fafaf8;
+    }
+    #coord-panel .row { display: flex; gap: 10px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>SCB Boundary Drawer</h1>
+  <span class="point-count" id="pt-count">0 pts</span>
+
+  <div class="sep"></div>
+
+  <!-- Draw-mode controls -->
+  <button class="btn" id="btn-undo" disabled onclick="undoLast()">↩ Undo</button>
+  <button class="btn danger" id="btn-clear" disabled onclick="clearAll()">✕ Clear</button>
+
+  <div class="sep"></div>
+
+  <button class="btn" id="btn-paste" onclick="openPastePanel()">Paste coords</button>
+  <button class="btn primary" id="btn-generate" disabled onclick="generateMap()">✓ Generate map</button>
+
+  <div class="sep"></div>
+
+  <button class="btn success" id="btn-export" disabled onclick="exportPNG()">⬇ Export PNG</button>
+  <span id="export-status"></span>
+  <button class="btn" id="btn-coords" style="display:none" onclick="openCoordPanel()">View coords</button>
+  <button class="btn" id="btn-redraw" style="display:none" onclick="redraw()">✏ Redraw</button>
+
+  <span id="status">Click the map to place boundary points</span>
+</div>
+
+<div id="map" class="draw-mode"></div>
+
+<div id="overlay" onclick="closePanels()"></div>
+
+<!-- Paste coords panel -->
+<div id="paste-panel">
+  <h2>Paste boundary coordinates</h2>
+  <p>Paste a coordinate array (JS or JSON format) to load an existing boundary onto the map.</p>
+  <textarea id="paste-input" spellcheck="false" placeholder="const boundary = [
+  [36.684389, -121.675816],
+  ...
+];"></textarea>
+  <div id="paste-error">Could not parse coordinates — check the format.</div>
+  <div class="row">
+    <button class="btn primary" onclick="loadPasted()">Load</button>
+    <button class="btn" onclick="closePanels()">Cancel</button>
+  </div>
+</div>
+
+<!-- Coord export panel -->
+<div id="coord-panel">
+  <h2>Boundary coordinates</h2>
+  <p>Copy these to save your boundary or share with others.</p>
+  <textarea id="coord-output" readonly></textarea>
+  <div class="row">
+    <button class="btn primary" onclick="copyCoords()">Copy to clipboard</button>
+    <button class="btn" onclick="closePanels()">Close</button>
+  </div>
+</div>
+
+<script>
+  // ── Map setup ──────────────────────────────────────────────────────────────
+  const map = L.map('map', { zoomControl: true, scrollWheelZoom: true, preferCanvas: true })
+    .setView([36.690, -121.657], 14);
+
+  const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    subdomains: 'abcd', maxZoom: 19, crossOrigin: true
+  }).addTo(map);
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let points   = [];
+  let markers  = [];
+  let polyline = null;
+  let polygon  = null;
+  let closingLine = null;
+  let finalPolygon = null;
+  let mode = 'draw'; // 'draw' | 'generated'
+  let tilesReady = false;
+
+  tileLayer.on('load', () => { tilesReady = true; syncExportBtn(); });
+  map.on('tileloadstart', () => { tilesReady = false; syncExportBtn(); });
+
+  // ── Icons ──────────────────────────────────────────────────────────────────
+  const dotIcon = () => L.divIcon({
+    className: '',
+    html: `<div style="width:12px;height:12px;border-radius:50%;background:#1D6FA4;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>`,
+    iconSize: [12,12], iconAnchor: [6,6]
+  });
+
+  // ── Draw mode ──────────────────────────────────────────────────────────────
+  map.on('click', function(e) {
+    if (mode !== 'draw') return;
+    const ll = e.latlng;
+    points.push([parseFloat(ll.lat.toFixed(6)), parseFloat(ll.lng.toFixed(6))]);
+    const m = L.marker(ll, { icon: dotIcon(), zIndexOffset: 1000 })
+      .addTo(map)
+      .bindTooltip('Point ' + points.length, { direction: 'top', offset: [0,-8] });
+    markers.push(m);
+    updateDrawing();
+  });
+
+  function updateDrawing() {
+    if (polyline)     { map.removeLayer(polyline);     polyline = null; }
+    if (polygon)      { map.removeLayer(polygon);      polygon = null; }
+    if (closingLine)  { map.removeLayer(closingLine);  closingLine = null; }
+
+    if (points.length >= 2) {
+      polyline = L.polyline(points, { color: '#1D6FA4', weight: 3, opacity: 0.95, dashArray: '8,5' }).addTo(map);
+    }
+    if (points.length >= 3) {
+      polygon = L.polygon(points, { color: '#1D6FA4', weight: 0, fillColor: '#378ADD', fillOpacity: 0.15 }).addTo(map);
+      closingLine = L.polyline([points[points.length-1], points[0]], {
+        color: '#1D6FA4', weight: 2, opacity: 0.5, dashArray: '4,6'
+      }).addTo(map);
+    }
+
+    const n = points.length;
+    document.getElementById('pt-count').textContent = n + (n === 1 ? ' pt' : ' pts');
+    document.getElementById('btn-undo').disabled    = n === 0;
+    document.getElementById('btn-clear').disabled   = n === 0;
+    document.getElementById('btn-generate').disabled = n < 3;
+    document.getElementById('status').textContent =
+      n === 0 ? 'Click the map to place boundary points' :
+      n < 3   ? n + ' point' + (n>1?'s':'') + ' — keep clicking to trace the boundary' :
+                n + ' points — keep tracing, or click Generate when done';
+  }
+
+  function undoLast() {
+    if (points.length === 0 || mode !== 'draw') return;
+    points.pop();
+    const m = markers.pop();
+    if (m) map.removeLayer(m);
+    updateDrawing();
+  }
+
+  function clearAll() {
+    if (mode !== 'draw') return;
+    if (!confirm('Clear all points and start over?')) return;
+    points = [];
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+    updateDrawing();
+  }
+
+  // ── Generate map ───────────────────────────────────────────────────────────
+  function generateMap() {
+    if (points.length < 3) return;
+    mode = 'generated';
+
+    // Remove draw-mode layers
+    if (polyline)    { map.removeLayer(polyline);    polyline = null; }
+    if (polygon)     { map.removeLayer(polygon);     polygon = null; }
+    if (closingLine) { map.removeLayer(closingLine); closingLine = null; }
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+
+    // Remove map cursor
+    document.getElementById('map').classList.remove('draw-mode');
+
+    // Draw final styled polygon
+    if (finalPolygon) { map.removeLayer(finalPolygon); finalPolygon = null; }
+    finalPolygon = L.polygon(points, {
+      color: '#1D6FA4', weight: 2.5, opacity: 1,
+      dashArray: '9,5', fillColor: '#378ADD', fillOpacity: 0.15
+    }).addTo(map);
+
+    map.fitBounds(finalPolygon.getBounds(), { padding: [30, 30] });
+
+    // Update UI
+    document.getElementById('btn-generate').style.display = 'none';
+    document.getElementById('btn-undo').style.display = 'none';
+    document.getElementById('btn-clear').style.display = 'none';
+    document.getElementById('btn-paste').style.display = 'none';
+    document.getElementById('btn-redraw').style.display = 'inline-block';
+    document.getElementById('btn-coords').style.display = 'inline-block';
+    document.getElementById('pt-count').textContent = points.length + ' pts';
+    document.getElementById('status').textContent = 'Map generated — export or redraw';
+
+    tilesReady = false;
+    syncExportBtn();
+
+    // Watch for tiles to finish
+    const onTilesLoad = () => { tilesReady = true; syncExportBtn(); };
+    tileLayer.once('load', onTilesLoad);
+    // Fallback: enable after 2.5s if tiles don't fire event
+    setTimeout(() => { if (!tilesReady) { tilesReady = true; syncExportBtn(); } }, 2500);
+  }
+
+  function syncExportBtn() {
+    document.getElementById('btn-export').disabled = !(mode === 'generated' && tilesReady);
+  }
+
+  // ── Redraw ─────────────────────────────────────────────────────────────────
+  function redraw() {
+    mode = 'draw';
+    if (finalPolygon) { map.removeLayer(finalPolygon); finalPolygon = null; }
+    points = []; markers = [];
+    document.getElementById('map').classList.add('draw-mode');
+    document.getElementById('btn-generate').style.display = 'inline-block';
+    document.getElementById('btn-undo').style.display = 'inline-block';
+    document.getElementById('btn-clear').style.display = 'inline-block';
+    document.getElementById('btn-paste').style.display = 'inline-block';
+    document.getElementById('btn-redraw').style.display = 'none';
+    document.getElementById('btn-coords').style.display = 'none';
+    document.getElementById('btn-export').disabled = true;
+    document.getElementById('export-status').style.display = 'none';
+    updateDrawing();
+  }
+
+  // ── Export PNG ─────────────────────────────────────────────────────────────
+  function exportPNG() {
+    const btn    = document.getElementById('btn-export');
+    const status = document.getElementById('export-status');
+    btn.disabled = true;
+    status.style.display = 'inline';
+    status.textContent = 'Rendering…';
+
+    leafletImage(map, function(err, canvas) {
+      if (err) {
+        console.error(err);
+        status.textContent = 'Export failed — try again.';
+        btn.disabled = false;
+        return;
+      }
+
+      const scale = 2;
+      const out = document.createElement('canvas');
+      out.width  = canvas.width  * scale;
+      out.height = canvas.height * scale;
+      const ctx = out.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.drawImage(canvas, 0, 0);
+
+      // Re-draw polygon on top
+      if (finalPolygon) {
+        const lls = finalPolygon.getLatLngs()[0];
+        ctx.beginPath();
+        lls.forEach((ll, i) => {
+          const pt = map.latLngToContainerPoint(ll);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else         ctx.lineTo(pt.x, pt.y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(55,138,221,0.15)';
+        ctx.fill();
+        ctx.setLineDash([9, 5]);
+        ctx.strokeStyle = '#1D6FA4';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+
+      const link = document.createElement('a');
+      link.download = 'salinas_service_area_boundary.png';
+      link.href = out.toDataURL('image/png');
+      link.click();
+
+      status.textContent = 'Downloaded!';
+      setTimeout(() => {
+        status.style.display = 'none';
+        btn.disabled = false;
+      }, 2500);
+    });
+  }
+
+  // ── Paste panel ────────────────────────────────────────────────────────────
+  function openPastePanel() {
+    document.getElementById('paste-panel').style.display = 'block';
+    document.getElementById('overlay').style.display = 'block';
+    document.getElementById('paste-error').style.display = 'none';
+  }
+
+  function loadPasted() {
+    const raw = document.getElementById('paste-input').value.trim();
+    const matches = Array.from(raw.matchAll(/\[\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\]/g));
+    if (matches.length < 3) {
+      document.getElementById('paste-error').style.display = 'block';
+      return;
+    }
+
+    // Clear current state
+    if (finalPolygon) { map.removeLayer(finalPolygon); finalPolygon = null; }
+    if (polyline)     { map.removeLayer(polyline);     polyline = null; }
+    if (polygon)      { map.removeLayer(polygon);      polygon = null; }
+    if (closingLine)  { map.removeLayer(closingLine);  closingLine = null; }
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+
+    points = matches.map(m => [parseFloat(m[1]), parseFloat(m[2])]);
+    closePanels();
+    generateMap();
+  }
+
+  // ── Coord panel ────────────────────────────────────────────────────────────
+  function openCoordPanel() {
+    const coordStr = points.map(p => `  [${p[0]}, ${p[1]}]`).join(',\n');
+    document.getElementById('coord-output').value =
+      `// Team Name Boundary — ${points.length} points\nconst boundary = [\n${coordStr}\n];`;
+    document.getElementById('coord-panel').style.display = 'block';
+    document.getElementById('overlay').style.display = 'block';
+  }
+
+  function copyCoords() {
+    const ta = document.getElementById('coord-output');
+    ta.select();
+    document.execCommand('copy');
+    const btn = event.target;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy to clipboard', 2000);
+  }
+
+  // ── Shared close ──────────────────────────────────────────────────────────
+  function closePanels() {
+    document.getElementById('paste-panel').style.display = 'none';
+    document.getElementById('coord-panel').style.display = 'none';
+    document.getElementById('overlay').style.display = 'none';
+  }
+</script>
+</body>
+</html>
